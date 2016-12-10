@@ -15,10 +15,14 @@
 class S_EEPROM
 {
     void loadRPMSettings();
+    void loadMotorSettings();
+    void loadTempSettings();
+    
     void loadNumbers();
+    void loadAlterNumber();
+    void loadAlterNumberSetting();
     void clearLoadedNumbers();
 
-    
     void updateNumberChanges();
     bool write_StringEE(int Addr, String input);
     String read_StringEE(int Addr, int length);
@@ -31,15 +35,29 @@ class S_EEPROM
     byte numbersCount;
     bool machineOn;
     unsigned short int RPM;
+    unsigned short int MOTORLOW;
+    unsigned short int MOTORHIGH;
+    unsigned short int HIGHTEMP;
+    
     String primaryNumber;
     String secondary[4];
 
+    String alterNumber;
+    byte alterNumberSetting;
+    byte alterNumberPresent;
+
+
     S_EEPROM();
-    void saveRPMSettings(unsigned short int);
+    void saveHighRPMSettings(unsigned short int);
+    void saveMotorLowSettings(unsigned short int);
+    void saveMotorHighSettings(unsigned short int);
+    void saveTempSettings(unsigned short int temp);
+
     byte checkExists(String number);
     void loadAllData();
-    bool addNumber(String number, bool admin=false);
-    bool removeNumber(String number, bool admin=false);
+    bool addNumber(String number);
+    bool addAlternateNumber(String number);
+    bool removeNumber(String number);
     void clearNumbers(bool admin);
 };
 #endif

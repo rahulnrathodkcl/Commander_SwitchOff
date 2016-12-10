@@ -1,106 +1,28 @@
 #include "S_EEPROM.h"
 
-void S_EEPROM::saveRPMSettings(unsigned short int RPM)
-{
-  EEPROM.put(RPMAddress, RPM);
-}
-
-S_EEPROM::S_EEPROM()
-{
-  numbersCount = 0;
-  //primaryNumber.reserve(12);
-}
-
-byte S_EEPROM::checkExists(String number)
-{
-  if (numbersCount > 0)
-  {
-    if (primaryNumber == number)
-    {
-      return 0;
-    }
-
-    for (byte i = 0; i < numbersCount - 1; i++)
-    {
-      if (secondary[i] == number)
-      {
-        return i + 1;
-      }
-    }
-  }
-  return 0xFF;
-}
-
-bool S_EEPROM::addNumber(String number, bool admin)
-{
-  if (number.length() == 10)
-  {
-    if (numbersCount == 5)
-      return false;
-    else
-    {
-      if (checkExists(number) == 0xFF)
-      {
-        if (numbersCount == 0)
-          primaryNumber = number;
-        else if (numbersCount < 5)
-          secondary[numbersCount - 1] = number;
-
-        numbersCount++;
-        updateNumberChanges();
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool S_EEPROM::removeNumber(String number, bool admin)
-{
-  if (number.length() == 10)
-  {
-    if (numbersCount < 2)
-      return false;
-    else
-    {
-      byte loc=checkExists(number);
-      if(loc!=0xFF && loc!=0x00)
-      {
-          secondary[loc - 1] = "";
-          for (byte i = loc; i < numbersCount; i++)
-          {
-            secondary[i - 1] = secondary[i];
-          }
-          numbersCount--;
-          updateNumberChanges();
-          return true;        
-      }
-    }
-  }
-  return false;
-}
-
-void S_EEPROM::updateNumberChanges()
-{
-  EEPROM.put(numbersCountAddress, numbersCount);
-  if (numbersCount > 0)
-  {
-    write_StringEE(mobileNumberAddress, primaryNumber);
-    for (byte temp = 1; temp < numbersCount; temp++)
-    {
-      write_StringEE(mobileNumberAddress + (11 * temp), secondary[temp - 1]);
-    }
-  }
-}
-
 void S_EEPROM::loadRPMSettings()
 {
-  EEPROM.get(RPMAddress, RPM);
+  EEPROM.get(RPMAddress,RPM);
+
   if (RPM == 0xFFFF)
-  {
-    saveRPMSettings(500);
-    RPM = 500;
-  }
+    saveHighRPMSettings(700);
+}
+
+void S_EEPROM::loadMotorSettings()
+{
+  EEPROM.get(motorLowAddress,MOTORLOW);
+  EEPROM.get(motorHighAddress,MOTORHIGH);
+  if(MOTORLOW==0xFFFF)
+    saveMotorLowSettings(65);
+  if(MOTORHIGH==0xFFFF)
+    saveMotorHighSettings(348);
+}
+
+void S_EEPROM::loadTempSettings()
+{
+  EEPROM.get(highTempAddress,HIGHTEMP);
+  if(HIGHTEMP==0xFFFF)
+    saveTempSettings(50);
 }
 
 void S_EEPROM::loadNumbers()
@@ -121,6 +43,26 @@ void S_EEPROM::loadNumbers()
   }
 }
 
+
+
+void S_EEPROM::loadAlterNumber()
+{
+  EEPROM.get(alterNumberPresentAddress, alterNumberPresent);
+  if(alterNumberPresent==(byte)true)
+  {
+    alterNumber = read_StringEE(alterNumberAddress, 11);
+  }
+  else if(alterNumberPresent==0xFF)
+    EEPROM.put(alterNumberPresentAddress,(byte)false);
+}
+
+void S_EEPROM::loadAlterNumberSetting()
+{
+  EEPROM.get(alterNumberSettingAddress,alterNumberSetting);
+  if(alterNumberSetting==0xFF)
+    saveAlterNumberSetting(false);
+}
+
 void S_EEPROM::clearLoadedNumbers()
 {
   numbersCount = 0;
@@ -131,10 +73,146 @@ void S_EEPROM::clearLoadedNumbers()
   }
 }
 
+void S_EEPROM::saveHighRPMSettings(unsigned short int HRPM)
+{
+  RPM=HRPM;
+  EEPROM.put(RPMAddress, RPM);
+}
+
+void S_EEPROM::saveMotorLowSettings(unsigned short int mLow)
+{
+  MOTORLOW=mLow;
+  EEPROM.put(motorLowAddress,MOTORLOW);  
+}
+
+void S_EEPROM::saveMotorHighSettings(unsigned short int mHigh)
+{
+  MOTORHIGH=mHigh;
+  EEPROM.put(motorHighAddress,MOTORHIGH);
+}
+
+void S_EEPROM::saveTempSettings(unsigned short int temp)
+{
+  EEPROM.put(highTempAddress,temp);
+  EEPROM.get(highTempAddress,HIGHTEMP);
+}
+
+void S_EEPROM::saveAlterNumberSetting(bool temp)
+{
+  alterNumberSetting=temp;
+  EEPROM.put(alterNumberSettingAddress,alterNumberSetting);
+}
+
+S_EEPROM::S_EEPROM()
+{
+  numbersCount = 0;
+}
+
+byte S_EEPROM::checkExists(String number)
+{
+  if (numbersCount > 0)
+  {
+    if(!alterNumberSetting)
+    {
+      if (primaryNumber == number)
+        return 0;
+    }
+    else
+    {
+      if(alterNumber==number)
+      return 0;
+    }
+
+    for (byte i = 0; i < numbersCount - 1; i++)
+    {
+      if (secondary[i] == number)
+      {
+        return i + 1;
+      }
+    }
+
+  }
+  return 0xFF;
+}
+
+bool S_EEPROM::addNumber(String number)
+{
+    if (numbersCount == 5)
+      return false;
+    else
+    {
+      if (checkExists(number) == 0xFF)
+      {
+        if (numbersCount == 0)
+          primaryNumber = number;
+        else if (numbersCount < 5)
+          secondary[numbersCount - 1] = number;
+
+        numbersCount++;
+        updateNumberChanges();
+        return true;
+      }
+    }
+  return false;
+}
+
+bool S_EEPROM::addAlternateNumber(String number)
+{
+    if(numbersCount>0)
+    {
+      alterNumber=number;
+      alterNumberPresent=true;
+      EEPROM.put(alterNumberPresentAddress, alterNumberPresent);
+      write_StringEE(alterNumberAddress,alterNumber);
+      return true;
+    }
+    return false;
+}
+
+
+bool S_EEPROM::removeNumber(String number)
+{
+    if (numbersCount < 2)
+      return false;
+    else
+    {
+      byte loc=checkExists(number);
+      if(loc!=0xFF && loc!=0x00)
+      {
+          secondary[loc - 1] = "";
+          for (byte i = loc; i < numbersCount; i++)
+          {
+            secondary[i - 1] = secondary[i];
+          }
+          numbersCount--;
+          updateNumberChanges();
+          return true;        
+      }
+    }
+  return false;
+}
+
+void S_EEPROM::updateNumberChanges()
+{
+  EEPROM.put(numbersCountAddress, numbersCount);
+  if (numbersCount > 0)
+  {
+    write_StringEE(mobileNumberAddress, primaryNumber);
+    for (byte temp = 1; temp < numbersCount; temp++)
+    {
+      write_StringEE(mobileNumberAddress + (11 * temp), secondary[temp - 1]);
+    }
+  }
+}
+
 void S_EEPROM::loadAllData()
 {
   loadRPMSettings();
+  loadTempSettings();
+  loadMotorSettings();
   loadNumbers();
+  loadAlterNumberSetting();
+  loadAlterNumber();
 }
 
 void S_EEPROM::clearNumbers(bool admin = false)
