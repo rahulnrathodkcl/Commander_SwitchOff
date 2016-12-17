@@ -1,20 +1,19 @@
 #ifndef SMOTOR_R_h
 #define SMOTOR_R_h
-#include <Arduino.h>
 
-#define disable_debug
+#include "S_EEPROM.h"
+#include "Definitions.h"
+
 
 class SMOTOR_R
 {			
-	byte REL_SLOW;
-	byte REL_FAST;
-	byte PWR_SEN;
-	byte SEN_PIN;
+	S_EEPROM *eeprom1;
+	const char MOTOR_PREVIOUSSTATE='L';
+	const char MOTOR_HIGH='H';
+	const char MOTOR_LOW='L';
+	const char MOTOR_NORMAL='N';
 
 	bool selfOperating;
-
-	float minVoltage;
-	float maxVoltage;
 
 	byte speedWaitTime;
 	unsigned long speedWait;
@@ -23,6 +22,7 @@ class SMOTOR_R
 	unsigned long wait;
 	unsigned long switchOffWaitTime;
 
+	byte steps;
 	bool backingOff;
 
 	bool operationPerformed;
@@ -33,27 +33,52 @@ class SMOTOR_R
 	void (*finc)();
 	void (*fdec)();
 	void (*fMachineNotSwitchedOff)();
+	void (*returnCommandStatus)(bool);
+
 	
-	void stopOperating();
-	bool checkStopOperatingElligible();
+	void anotherConstructor(void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool));
 	
-	bool stopBackingOffElligible();
-	void stopBackOff();
-	
+	bool operatingTimeOver();
+	bool operateOnEvent();
+
+	void signalOn();
+	void signalOff();
+	void turnOn();
+	void turnOff();
+
 	bool makeResponseElligible();
 	void makeResponse();
 
-	float getAnalogInput();
+	unsigned short int getAnalogInput();
+
+	void stopBackOff();
+	void stopOperating();
+
 	#ifndef disable_debug
-	HardwareSerial *_Serial;
+  		#ifdef software_SIM
+		    HardwareSerial* _Serial;
+		#else
+		    SoftwareSerial* _Serial;
+		#endif
 	#endif
 
 	public:
 
-	SMOTOR_R(byte SLOWPIN,byte FASTPIN,byte PWRPIN,byte SEN,float MINVOLT,float MAXVOLT,HardwareSerial *serial,void (*inc)(),void (*dec)(), void (*MNotSwitchOff)());
-	bool increaseRPM();
-	bool decreaseRPM();
-	bool switchOff();
+#ifndef disable_debug
+	#ifdef software_SIM
+		SMOTOR_R(HardwareSerial *serial,void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool));
+	#else
+		SMOTOR_R(SoftwareSerial *serial,void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool));
+	#endif
+#else
+	SMOTOR_R(void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool));
+#endif
+
+    void setEEPROM(S_EEPROM* e1);
+    void increaseRPM(byte steps);
+	void decreaseRPM(byte steps);
+	void switchOff();
+
 	void backOff();
 	char checkCurrentOperation();
 	char checkLimit();

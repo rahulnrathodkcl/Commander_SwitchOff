@@ -1,21 +1,38 @@
+#include <Arduino.h>
 #include "SMOTOR_R.h"
 
-SMOTOR_R::SMOTOR_R(byte SLOWPIN,byte FASTPIN,byte PWRPIN,byte SENPIN,float minVOLT,float maxVOLT,HardwareSerial *serial,void (*inc)(),void (*dec)(),void (*MnotSwitchOff)())
+#ifndef disable_debug
+	#ifdef software_SIM
+		SMOTOR_R::SMOTOR_R(HardwareSerial *serial,void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool))
+		{
+			_Serial=serial;
+			anotherConstructor(inc,dec,MnotSwitchOff,retStatus);
+		}
+	#else
+		SMOTOR_R::SMOTOR_R(SoftwareSerial *serial,void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool))
+		{
+			_Serial=serial;
+			anotherConstructor(inc,dec,MnotSwitchOff,retStatus);
+		}
+	#endif
+
+#else
+	SMOTOR_R::SMOTOR_R(void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool))
+	{
+		anotherConstructor(inc,dec,MnotSwitchOff,retStatus);
+	}
+
+#endif
+
+void SMOTOR_R::anotherConstructor(void (*inc)(),void (*dec)(),void (*MnotSwitchOff)(),void(*retStatus)(bool))
 {
-	REL_SLOW=SLOWPIN;
-	REL_FAST=FASTPIN;
-	PWR_SEN=PWRPIN;
-	SEN_PIN=SENPIN;
-	minVoltage=minVOLT;
-	maxVoltage=maxVOLT;
+	pinMode(PIN_SMOTORPWR,OUTPUT);
 
-	pinMode(REL_SLOW,OUTPUT);
-	pinMode(REL_FAST,OUTPUT);
-	pinMode(PWR_SEN,OUTPUT);
+	pinMode(PIN_SLOW,OUTPUT);
+	pinMode(PIN_FAST,OUTPUT);
 
-	digitalWrite(REL_SLOW,HIGH);
-	digitalWrite(REL_FAST,HIGH);
-	//pinMode(SEN_PIN,INPUT);
+	digitalWrite(PIN_SLOW,LOW);
+	digitalWrite(PIN_FAST,LOW);
 	
 	waitTime=250;//x100
 	switchOffWaitTime=600;
@@ -25,152 +42,137 @@ SMOTOR_R::SMOTOR_R(byte SLOWPIN,byte FASTPIN,byte PWRPIN,byte SENPIN,float minVO
 	finc=*inc;
 	fdec=*dec;
 	fMachineNotSwitchedOff=*MnotSwitchOff;
+	returnCommandStatus=*retStatus;
 
 	operating=false;
 	backingOff=false;
 	operationPerformed=false;
-	#ifndef disable_debug
-	_Serial=serial;
-	#endif
 }
 
-bool SMOTOR_R::increaseRPM()
+bool SMOTOR_R::operatingTimeOver()
 {
-	if(checkLimit()!='F')
+	if(operating)
 	{
-		if(operating)
-			return false;
-		currentOperation='I';
-		digitalWrite(PWR_SEN,HIGH);
-		digitalWrite(REL_FAST,LOW);
-		digitalWrite(REL_SLOW,HIGH);
-		speedWait=millis();
-		operating=true;	
-		return true;
+		if(currentOperation!='S' && millis()-speedWait>=((speedWaitTime*steps)*100))
+			{
+				#ifndef disable_debug
+					_Serial->println("TIME LIMIT");
+				#endif
+					return true;
+			}
 	}
-	else
-	{
-		#ifndef disable_debug
-		_Serial->println("Motor limit");
-		#endif
-		return false;	
-	}
+	return false;
 }
 
-bool SMOTOR_R::decreaseRPM()
-{	
-	if(checkLimit()!='S')
-	{	
-		if(operating)
-			return false;
-		currentOperation='D';
-		digitalWrite(PWR_SEN,HIGH);
-		digitalWrite(REL_SLOW,LOW);
-		digitalWrite(REL_FAST,HIGH);
-		speedWait=millis();
-		operating=true;
-		return true;
-	}
-	else
-	{
-		#ifndef disable_debug
-		_Serial->println("Motor limit");
-		#endif
-		return false;
-	}
-}
-
-bool SMOTOR_R::switchOff()
-{
-	if(checkLimit()!='S')
-	{
-		if(operating)
-			return false;
-		currentOperation='S';
-		lastMotorPos=getAnalogInput();
-		digitalWrite(PWR_SEN,HIGH);
-		digitalWrite(REL_SLOW,LOW);
-		digitalWrite(REL_FAST,HIGH);
-		operating=true;	
-		return true;
-	}
-	else
-		return false;
-}
-
-void SMOTOR_R::stopOperating()
-{
-	digitalWrite(PWR_SEN,LOW);
-	digitalWrite(REL_SLOW,HIGH);
-	digitalWrite(REL_FAST,HIGH);
-	operating=false;
-	wait=millis();
-	operationPerformed=true;
-}
-
-bool SMOTOR_R::checkStopOperatingElligible()
+bool SMOTOR_R::operateOnEvent()
 {
 	if(operating)
 	{
 		char r=checkLimit();
-		#ifndef disable_debug
-		_Serial->println(r);
-		#endif
-		if((r=='S' && currentOperation=='D') || (r=='F' && currentOperation=='I') || (r=='S' && currentOperation=='S'))
+		if(backingOff)
 		{
-			#ifndef disable_debug
-			_Serial->println("Motor Limit");
-			#endif
-			return true;
-		}
-		else
-		{
-			if(currentOperation!='S' && millis()-speedWait>=(speedWaitTime*100))
-			{
-				#ifndef disable_debug
-				_Serial->println("TIME LIMIT");	
-				#endif
+			if(currentOperation=='B' && (r==MOTOR_PREVIOUSSTATE || r==MOTOR_LOW))
 				return true;
-			}
 		}
-	}	
-	return false;
-}
-
-bool SMOTOR_R::stopBackingOffElligible()
-{
-	if(selfOperating)
-		return true;
-
-	if(backingOff)
-	{
-		float temp=getAnalogInput();
-		if(temp<=minVoltage || temp<=lastMotorPos)
+		
+		if((r==MOTOR_LOW && currentOperation=='I') || (r==MOTOR_HIGH && (currentOperation=='D' || currentOperation=='S')))
 			return true;
-		else
-			return false;
 	}	
 	return false;
 }
+
+void SMOTOR_R::increaseRPM(byte steps)
+{
+	if(!operating && checkLimit()!=MOTOR_LOW)
+	{
+		this->steps=steps;
+		currentOperation='I';
+		turnOn();
+		digitalWrite(PIN_FAST,LOW);
+		digitalWrite(PIN_SLOW,HIGH);
+		speedWait=millis();
+		returnCommandStatus(true);
+	}
+	else
+	{
+		#ifndef disable_debug
+			_Serial->println("Motor limit");
+		#endif
+		returnCommandStatus(false);
+	}
+}
+
+void SMOTOR_R::setEEPROM(S_EEPROM* e1)
+{
+  eeprom1=e1;
+}
+
+void SMOTOR_R::decreaseRPM(byte steps)
+{	
+	if(!operating && checkLimit()!=MOTOR_HIGH)
+	{	
+		this->steps=steps;
+		currentOperation='D';
+		turnOn();
+		digitalWrite(PIN_SLOW,LOW);
+		digitalWrite(PIN_FAST,HIGH);
+		speedWait=millis();
+		returnCommandStatus(true);
+	}
+	else
+	{
+		#ifndef disable_debug
+			_Serial->println("Motor limit");
+		#endif
+		returnCommandStatus(false);
+	}
+}
+
+void SMOTOR_R::switchOff()
+{
+	if(!operating && checkLimit()!=MOTOR_HIGH)
+	{
+		currentOperation='S';
+		turnOn();
+		lastMotorPos=getAnalogInput();
+		digitalWrite(PIN_SLOW,LOW);
+		digitalWrite(PIN_FAST,HIGH);
+		returnCommandStatus(true);
+	}
+	else
+	{	
+		#ifndef disable_debug
+		_Serial->println("Motor limit");
+		#endif
+		returnCommandStatus(false);
+	}
+}
+
 
 void SMOTOR_R::stopBackOff()
 {
-	currentOperation='N';
-	digitalWrite(PWR_SEN,LOW);
-	digitalWrite(REL_SLOW,HIGH);
-	digitalWrite(REL_FAST,HIGH);
-	backingOff=false;
+	digitalWrite(PIN_SLOW,HIGH);
+	digitalWrite(PIN_FAST,HIGH);
+	turnOff();
+}
 
+void SMOTOR_R::stopOperating()
+{
+	digitalWrite(PIN_SLOW,HIGH);
+	digitalWrite(PIN_FAST,HIGH);
+	turnOff();
+	wait=millis();
+	operationPerformed=true;
 }
 
 void SMOTOR_R::backOff()
 {
-	currentOperation='B';
 	operationPerformed=false;
-	digitalWrite(PWR_SEN,HIGH);
-	digitalWrite(REL_SLOW,HIGH);
-	digitalWrite(REL_FAST,LOW);
+	currentOperation='B';
+	turnOn();
 	backingOff=true;
+	digitalWrite(PIN_SLOW,HIGH);
+	digitalWrite(PIN_FAST,LOW);
 }
 
 bool SMOTOR_R::makeResponseElligible()
@@ -209,50 +211,78 @@ char SMOTOR_R::checkCurrentOperation()
 	{
 		return currentOperation;
 	}
-	if(backingOff)
-		return 'B';
 	else return 'N';
 }
 
-float SMOTOR_R::getAnalogInput()
+void SMOTOR_R::signalOn()
+{
+	digitalWrite(PIN_SMOTORPWR,HIGH);	
+}
+
+void SMOTOR_R::signalOff()
+{
+	digitalWrite(PIN_SMOTORPWR,LOW);	
+}
+
+void SMOTOR_R::turnOn()
+{
+	operating=true;
+	signalOn();
+}
+
+void SMOTOR_R::turnOff()
+{
+	operating=false;
+	backingOff=false;
+	currentOperation='N';
+	signalOff();
+}
+
+unsigned short int SMOTOR_R::getAnalogInput()
 {
 	unsigned long temp;
-	float t2;
-	temp=0;
-
-	digitalWrite(PWR_SEN,HIGH);
-	analogRead(SEN_PIN);
-	for (int i=0;i<30;i++)
-	{
-		temp+=analogRead(SEN_PIN);
-	}
-
-	t2=temp/6144.0;		//t2=temp/30*5/1024;
-	return t2;
+	signalOn();
+	analogRead(PIN_SMOTORSIG);
+	temp=millis();
+	while(millis()-temp<2)
+	{}
+	temp=analogRead(PIN_SMOTORSIG);
+	signalOff();
+	return (unsigned short int)temp;
 }
 
 char SMOTOR_R::checkLimit()
 {	
-	float temp=getAnalogInput();
-	#ifndef disable_debug
-	_Serial->println(temp);
-	#endif
-	if(temp<=minVoltage)
-		return 'F';
-	else if(temp>=maxVoltage)
-		return 'S'; 
+	unsigned short int temp=getAnalogInput();
+	if(temp<=(eeprom1->MOTORLOW))
+		return MOTOR_LOW;
+	else if(temp>=(eeprom1->MOTORHIGH))
+		return MOTOR_HIGH; 
 	else 
-		return 'N';
+	{
+		if(operating && backingOff)
+		{
+			if(temp<=lastMotorPos)
+				return MOTOR_PREVIOUSSTATE;
+		}
+		return MOTOR_NORMAL;
+	}
 }
 
 void SMOTOR_R::update()
 {
-		if(checkStopOperatingElligible())
-			stopOperating();
+		// if(checkStopOperatingElligible())
+			// stopOperating();
+
+		if(operatingTimeOver() || operateOnEvent())
+		{
+			if(backingOff)	stopBackOff();
+			else 			stopOperating();
+		}	
 
 		if(makeResponseElligible())
 			makeResponse();
 
-		if(stopBackingOffElligible())
-			stopBackOff();
+		// if(stopBackingOffElligible())
+			// stopBackOff();
 }
