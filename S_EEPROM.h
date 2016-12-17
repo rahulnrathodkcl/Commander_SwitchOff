@@ -1,9 +1,10 @@
 #ifndef S_EEPROM_h
 #define S_EEPROM_h
 
-#include <Arduino.h>
 #include <String.h>
 #include <EEPROM.h>
+
+#include "Definitions.h"
 
 #define RPMAddress 0
 #define numbersCountAddress 4
@@ -22,6 +23,7 @@ class S_EEPROM
     void loadAlterNumber();
     void loadAlterNumberSetting();
     void clearLoadedNumbers();
+
 
     void updateNumberChanges();
     bool write_StringEE(int Addr, String input);
@@ -52,6 +54,7 @@ class S_EEPROM
     void saveMotorLowSettings(unsigned short int);
     void saveMotorHighSettings(unsigned short int);
     void saveTempSettings(unsigned short int temp);
+    void saveAlterNumberSetting(bool temp);
 
     byte checkExists(String number);
     void loadAllData();

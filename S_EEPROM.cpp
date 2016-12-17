@@ -240,7 +240,6 @@ void S_EEPROM::clearNumbers(bool admin = false)
     EEPROM.write(i, 0xFF);
   }
   EEPROM.put(numbersCountAddress, numbersCount);
-  //EEPROM_MAX_ADDR 1023
 }
 
 bool S_EEPROM::write_StringEE(int Addr, String input)
