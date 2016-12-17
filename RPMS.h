@@ -1,24 +1,25 @@
 #ifndef RPMS_h
 #define RPMS_h
 
-#include <Arduino.h>
 #include "S_EEPROM.h"
-#define disable_debug
+#include "Definitions.h"
 
 class RPMS
 {
 	private:
 	volatile double RPM;
  
-	void anotherConstructor(byte,int);
-	byte SEN_RPM;
-	int RPMLimit;
+	void anotherConstructor();
     bool firedRPMEvent;
 	byte startCnt;
 	byte HRPMCnt;
-
+	
 	#ifndef disable_debug
-	HardwareSerial* _NSerial;
+  		#ifdef software_SIM
+		    HardwareSerial* _NSerial;
+		#else
+		    SoftwareSerial* _NSerial;
+		#endif
 	#endif
 
 	void (*RPMLimitReached)();
@@ -38,19 +39,21 @@ class RPMS
   	volatile unsigned long lastrise;
   	volatile unsigned long currentrise;
 
-  	#ifdef USE_ALTERNATOR
-		byte REL_ALTERNATOR;
-		RPMS(byte,byte,int,HardwareSerial *s);
 
-  	#else
-  		RPMS(byte,int,HardwareSerial *s);
-  	#endif
-    
+	#ifndef disable_debug
+  		#ifdef software_SIM
+			RPMS(HardwareSerial *s);
+		#else
+			RPMS(SoftwareSerial *s);
+		#endif
+	#else
+		RPMS();
+	#endif
+
     void setEEPROM(S_EEPROM* e1);
 	void IVR_RPM();
 	void setCallBackFunctions(void (*funcRPMChange)(),void (*machineSwitchOff)(),void (*machineTurnedOn)());
 	double getRPM();
-	void discardRPMEvent();
 	void update();
 };
 #endif

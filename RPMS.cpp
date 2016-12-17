@@ -1,39 +1,31 @@
 #include "RPMS.h"
-#include <Arduino.h>
 
-#ifdef USE_ALTERNATOR
-  RPMS::RPMS(byte SRPM, byte RELALTERNATOR,int VRPMLimit, HardwareSerial *serial)
-  {
-
-    REL_ALTERNATOR=RELALTERNATOR;
-    pinMode(REL_ALTERNATOR,OUTPUT);
-    digitalWrite(REL_ALTERNATOR,HIGH);
-
-    anotherConstructor(SRPM,VRPMLimit)
-    #ifndef disable_debug
+#ifndef disable_debug
+  #ifdef software_SIM
+    RPMS::RPMS(HardwareSerial *serial)
+    {
       _NSerial = serial;
       _NSerial->begin(19200);
-    #endif
-  }
-
+      anotherConstructor();
+    }
+  #else
+    RPMS::RPMS(SoftwareSerial *serial)
+    {
+      _NSerial = serial;
+      _NSerial->begin(19200);
+      anotherConstructor();
+    }
+  #endif
 #else
-
-  RPMS::RPMS(byte SRPM,int VRPMLimit, HardwareSerial *serial)
+  RPMS::RPMS()
   {
-    anotherConstructor(SRPM,VRPMLimit);
- 
-    #ifndef disable_debug
-      _NSerial = serial;
-      _NSerial->begin(19200);
-    #endif
+    anotherConstructor();
   }
 #endif
 
-void RPMS::anotherConstructor(byte SRPM, int VRPMLimit)
+void RPMS::anotherConstructor()
 {
-    SEN_RPM = SRPM;
-    RPMLimit=VRPMLimit;
-    pinMode(SEN_RPM,INPUT);
+    pinMode(PIN_RPMSEN,INPUT_PULLUP);
 
     turnMachineOff(); 
     RPM = 0;
@@ -65,21 +57,22 @@ void RPMS::IVR_RPM()
     
     if(getMachineStatus()==false)
     {
-      if(tempRPM>150 && startCnt<10)
+      if(tempRPM>150 && startCnt<250)
         startCnt++;
-      else if(startCnt>=10)
+      else if(startCnt>=250)
         turnMachineOn();    
     }
-    /*if(tempRPM==0)
+   if(firedRPMEvent && tempRPM<(eeprom1->RPM))
     {
-      turnMachineOn();    
-    }*/
-
+        HRPMCnt=0;
+        firedRPMEvent=false;
+    }    
+    
     if(!firedRPMEvent && machineOn)
     {
         if(tempRPM>(eeprom1->RPM))
         {
-          if(HRPMCnt<10)
+          if(HRPMCnt<250)
             HRPMCnt++;
           else
           {
@@ -153,29 +146,21 @@ void RPMS::turnMachineOn()
 {
   startCnt=0;
   machineOn = true;
+  eeprom1->machineOn=true;
   MachineSwitchedOn();
-  #ifdef USE_ALTERNATOR
-  digitalWrite(REL_ALTERNATOR,LOW);
-  #endif
 }
 
 void RPMS::turnMachineOff()
 {
   startCnt=0;
   machineOn = false;
-  #ifdef USE_ALTERNATOR
-  digitalWrite(REL_ALTERNATOR,HIGH);
-  #endif
+  firedRPMEvent=false;
+  eeprom1->machineOn=false;
 }
 
 bool RPMS::getMachineStatus()
 {
   return machineOn;
-}
-
-void RPMS::discardRPMEvent()
-{
-  firedRPMEvent=false;
 }
 
 void RPMS::update()
