@@ -1,30 +1,41 @@
 #ifndef BATTERY_h
 
 #define BATTERY_h
-#include <Arduino.h>
-
-#define disable_debug
+#include "Definitions.h"
 
 class BATTERY
 {
-	byte SEN_PIN;
-	byte PWR_PIN;
 	byte batteryLevel;
-	bool motorOff;
 	unsigned long lastCheck;
 	bool alarmed;
+
 	#ifndef disable_debug
-	HardwareSerial *_Serial;
+  		#ifdef software_SIM
+		    HardwareSerial* _Serial;
+		#else
+		    SoftwareSerial* _Serial;
+		#endif
 	#endif
 
-	byte getBatteryLevel();
-	char (*fMotorStatus)();
-	void (*fLowBattery)();
+	void anotherConstructor();
+	void operateOnQuery();
 	bool checkSufficientLevel();
+	byte getBatteryLevel();
+	void checkBatteryLevel();
 
 	public:
-	BATTERY(byte,byte,void (*lowBattery)(),char (*motorStatus)(),HardwareSerial *serial);
-	void update();
+			#ifndef disable_debug
+  		#ifdef software_SIM
+			BATTERY(HardwareSerial *s);
+		#else
+			BATTERY(SoftwareSerial *s);
+		#endif
+	#else
+		BATTERY();
+	#endif
+	bool triggerAlarm;
 	void checkInitialBatteryLevel();
+	void checkedAlarm(bool falseAlarm=false);
+	void update();
 };
 #endif

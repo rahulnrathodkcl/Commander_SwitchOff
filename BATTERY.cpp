@@ -1,31 +1,45 @@
 #include "BATTERY.h"
 
-BATTERY::BATTERY(byte BPWR_PIN,byte BSEN_PIN,void (*lbattery)(),char (*fmotor)(),HardwareSerial *serial)
+#ifndef disable_debug
+  #ifdef software_SIM
+    BATTERY::BATTERY(HardwareSerial *serial)
+    {
+      _Serial = serial;
+      _Serial->begin(19200);
+      anotherConstructor();
+    }
+  #else
+    BATTERY::BATTERY(SoftwareSerial *serial)
+    {
+      _Serial = serial;
+      _Serial->begin(19200);
+      anotherConstructor();
+    }
+  #endif
+#else
+	BATTERY::BATTERY()
+	{
+		anotherConstructor();
+	}
+#endif
+
+
+void BATTERY::anotherConstructor()
 {
-	PWR_PIN=BPWR_PIN;
-	SEN_PIN=BSEN_PIN;
-	pinMode(PWR_PIN,OUTPUT);
+	pinMode(PIN_BATTERYPWR,OUTPUT);
 	alarmed=false;
 	lastCheck=0;
-	fLowBattery=*lbattery;
-	fMotorStatus=*fmotor;
-
-	#ifndef disable_debug
-		_Serial=serial;		
-	#endif
 }
 
 bool BATTERY::checkSufficientLevel()
 {	
-	if(fMotorStatus()=='N')
+	if(batteryLevel<=2 || batteryLevel>80)
+		return false;
+	else if(batteryLevel>3 && alarmed==true)
 	{
-			if(batteryLevel<=2 || batteryLevel>80)
-				return false;
-			else if(batteryLevel>3 && alarmed==true)
-				alarmed=false;
-		return true;
+			alarmed=false;
+			return true;
 	}
-	return false;
 }
 
 byte BATTERY::getBatteryLevel()
@@ -33,14 +47,14 @@ byte BATTERY::getBatteryLevel()
 	float temp;
 	unsigned int t;
 
-	digitalWrite(PWR_PIN,HIGH);
-	analogRead(SEN_PIN);
+	digitalWrite(PIN_BATTERYPWR,HIGH);
+	analogRead(PIN_BATTERYSEN);
 	t=millis();
 	while(millis()-t<2)
 	{}
-	temp=analogRead(SEN_PIN);
+	temp=analogRead(PIN_BATTERYSEN);
 
-	digitalWrite(PWR_PIN,LOW);
+	digitalWrite(PIN_BATTERYPWR,LOW);
 	temp=temp*5.0/1024.0;
 	temp=temp*4.030;
 	temp=temp-11.5;
@@ -49,10 +63,6 @@ byte BATTERY::getBatteryLevel()
 		_Serial->println(temp);
 		_Serial->println((byte)(temp*10));
 	#endif
-//	if(temp<-1)
-//	{
-//		return 0xFF;
-//	}
 	temp=temp*10;
 	lastCheck=millis();
 	return (byte)temp;
@@ -60,14 +70,25 @@ byte BATTERY::getBatteryLevel()
 
 void BATTERY::checkInitialBatteryLevel()
 {
+	checkBatteryLevel();
+}
+
+void BATTERY::checkBatteryLevel()
+{
 	batteryLevel=getBatteryLevel();
-	if(!checkSufficientLevel() && alarmed==false)
+	if(!checkSufficientLevel() && !alarmed)
 	{
-			#ifndef disable_debug
-			_Serial->print("Battery is Low");
-			#endif
-			fLowBattery();
+			triggerAlarm=true;
+	}
+}
+
+void BATTERY::checkedAlarm(bool falseAlarm)
+{
+	if(triggerAlarm)
+	{
+		if(!falseAlarm)
 			alarmed=true;
+		triggerAlarm=false;
 	}
 }
 
