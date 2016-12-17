@@ -7,113 +7,197 @@
 #include "RPMS.h"
 #include "SMOTOR_R.h"
 #include "S_EEPROM.h"
-#include <SoftwareSerial.h>
-#define CHK_BATTERY
-
-#define disable_debug
-//#define USE_ALTERNATOR
-
-#define SEN_RPM 2
-#define REL_SLOW 3
-#define REL_FAST 4
-#define PWR_SIGM 9
-#define SEN_MPOS A0
+#include "BATTERY.h"
+#include "TEMP.h"
+#include "Definitions.h"
 
 #define SIM_SLEEP_PIN 8
 
-#define MinimumMotorVoltage 0.30
-#define MaximumMotorVoltage 1.70
-#define RPMLimit 500
-
-bool triedInit=false;
-  const byte RX=5;
-  const byte TX=6;
-  SoftwareSerial s1(RX,TX);
+//bool triedInit=false;
+//  const byte RX=5;
+//  const byte TX=6;
+//  SoftwareSerial s1(RX,TX);
 
 S_EEPROM eeprom1;
 
-
-#ifdef disable_debug
-  SIM sim1(&s1,SIM_SLEEP_PIN);
-#else
-  SIM sim1(&Serial,&s1,SIM_SLEEP_PIN);
-#endif 
-
 bool gotMachineOffCommand;
 char lastImmediateEvent;
+bool inform;
+bool sensorInit=false;
+bool initialized=false;
 
-#ifdef USE_ALTERNATOR
-  const byte REL_ALTERNATOR=10;
-    RPMS rpmSensor(SEN_RPM,REL_ALTERNATOR,RPMLimit,&Serial);
+bool securityAlarmed=false;
+bool gotCannotTurnOffMachineEvent=false;
+bool gotRPMIncreasedEvent=false;
+bool gotSwitchedOffEvent=false;
+bool gotStartedEvent=false;
+
+void registerRPMIncreased();
+void registerRPMDecreased();
+void cannotTurnOffMachine();
+void motorCommandStatus(bool);
+void informSIM(char);
+void triggerStopMachine(bool b=false);
+
+#ifndef disable_debug
+  SoftwareSerial s1(5,6);
+  #ifdef software_SIM
+    SIM sim1(&Serial,&s1);
+    RPMS rpmSensor1(&Serial);
+    SMOTOR_R smotor1(&Serial,registerRPMIncreased, registerRPMDecreased,cannotTurnOffMachine,motorCommandStatus);
+    BATTERY batteryLevel(&Serial);
+    TEMP temp1;
+    HardwareSerial* USART1=&Serial;
+  #else
+    SIM sim1(&s1,&Serial);
+    RPMS rpmSensor1(&s1);
+    SMOTOR_R smotor1(&s1,registerRPMIncreased, registerRPMDecreased,cannotTurnOffMachine,motorCommandStatus);
+    BATTERY batteryLevel(&s1);
+    TEMP temp1;
+    SoftwareSerial* USART1=&s1;
+  #endif
 #else
-  RPMS rpmSensor(SEN_RPM,RPMLimit,&Serial);
-#endif
+  SIM sim1(&Serial);
+  RPMS rpmSensor1(&s1);
+  BATTERY batteryLevel;
+  SMOTOR_R smotor1(registerRPMIncreased, registerRPMDecreased,cannotTurnOffMachine,motorCommandStatus);
+  TEMP temp1;
+#endif  
 
-void registerRPMIncreased()
+void gotImmediateResponse(bool temp)
 {
-  //sim1.registerEvent('I', false, false);
+  if (temp && eeprom1.machineOn)
+  {
+    #ifndef disable_debug
+        Serial.print("M Off I Event:");
+        Serial.println(lastImmediateEvent);
+    #endif
+    triggerStopMachine();
+  }
+  lastImmediateEvent = 'N';
 }
 
 void cannotTurnOffMachine()
 {
-      #ifndef disable_debug
-      Serial.println("Cannot Turn Off");  
-      #endif
-      sim1.registerEvent('Z', true, false); 
+  #ifndef disable_debug
+    USART1->println("Cannot Off");  
+  #endif
+  gotCannotTurnOffMachineEvent=true;
 }
 
-SMOTOR_R smotor1(REL_SLOW, REL_FAST, PWR_SIGM, SEN_MPOS, MinimumMotorVoltage, MaximumMotorVoltage, &Serial,registerRPMIncreased,registerRPMDecreased,cannotTurnOffMachine);
-
-#ifdef CHK_BATTERY
-  
-  #include "BATTERY.h"
-
-  #define PWR_BTRY 13
-  #define SEN_BTRY A1
-
-  void lowBattery()
-  {
-    #ifndef disable_debug
-      Serial.println("Low Battery");
-    #endif
-    sim1.registerEvent('B',true,false);
-  }
-  
-  char checkMotorOperation()
-  {
-    return smotor1.checkCurrentOperation();
-  }
-  BATTERY batteryLevel(PWR_BTRY,SEN_BTRY,lowBattery,checkMotorOperation,&Serial);
-#endif
-
-char increaseRPM()
+void reportCannotTurnOffMachine()
 {
-  if (smotor1.increaseRPM())
+  if(sim1.registerEvent('Z', true, false))
+    gotCannotTurnOffMachineEvent=false;
+}
+
+void lowBattery()
+{
+  #ifndef disable_debug
+    Serial.println("Low Battery");
+  #endif
+  
+  if(sim1.registerEvent('B',true,false))
   {
-    return 'D';
-  }
-  else
-  {
-    #ifndef disable_debug
-    Serial.println("LIMIT REACHED");
-    #endif
-    return 'L';
+    batteryLevel.checkedAlarm();
   }
 }
 
-char decreaseRPM()
+unsigned short int getRPM()
 {
-  if (smotor1.decreaseRPM())
+  return rpmSensor1.getRPM();
+}
+
+void reportSecurityBreach()
+{
+  if(sim1.registerEvent('Y',true,false))
   {
-    return 'D';
+    USART1->print("SEC");
+    USART1->println(" Event");
+    securityAlarmed=false;
+  }
+}
+
+void maxTempLimitReached()
+{
+  if(eeprom1.machineOn)
+  {
+    if(sim1.registerEvent('T', true,true))
+    {
+      lastImmediateEvent = 'T';
+      temp1.checkedAlarm();
+    }
+  }
+  else
+    temp1.checkedAlarm(true);
+}
+
+void triggerIncreaseRPM(byte steps=1)
+{
+  #ifndef disable_debug
+    USART1->print("INC");
+    USART1->println("RPM");
+  #endif  
+  smotor1.increaseRPM(steps);
+}
+
+void triggerDecreaseRPM(byte steps=1)
+{
+  #ifndef disable_debug
+    USART1->print("DEC");
+    USART1->println("RPM");
+  #endif  
+  smotor1.decreaseRPM(steps);
+}
+
+void triggerStopMachine(bool b)
+{
+  inform=b;
+  #ifndef disable_debug
+    USART1->println("STOP");
+  #endif
+  if(eeprom1.machineOn)
+  {
+    smotor1.switchOff();
   }
   else
   {
-    #ifndef disable_debug
-    Serial.println("LIMIT REACHED");
-    #endif
-    return 'L';
+  #ifndef disable_debug
+    USART1->println("OFF ");
+  #endif  
+    if(inform)
+      informSIM('O');
   }
+}
+
+void informSIM(char b)
+{
+    sim1.speedMotorStatus(b);
+    inform=false;
+}
+
+void motorCommandStatus(bool motorStatus)   //inc dec stopMachine command Status
+{    
+      if(smotor1.checkCurrentOperation()=='S')
+      {
+        if(motorStatus)
+          gotMachineOffCommand=true;
+
+        if(!inform)
+          return;
+      }
+
+    if(motorStatus)
+      informSIM('D');
+    else
+      informSIM('L');
+}
+
+
+
+void registerRPMIncreased()
+{
+  //sim1.registerEvent('I', false, false);
 }
 
 void registerRPMDecreased()
@@ -122,97 +206,66 @@ void registerRPMDecreased()
 }
 
 
-char stopMachine()
+void rpmIncreased()
 {
   #ifndef disable_debug
-  Serial.println("STOP ");
-  #endif
-  if (rpmSensor.getRPM() != 0 && rpmSensor.machineOn)
-  {
-          if (smotor1.switchOff())
-          {
-            gotMachineOffCommand = true;
-            #ifndef disable_debug
-            Serial.println("STOPPED");
-            #endif
-            return 'D';
-          }
-          else
-          {
-            #ifndef disable_debug
-            Serial.println("LIMIT REACHED ");
-            #endif
-            return 'L';
-          }
-  }
-  else
-  {
-    #ifndef disable_debug
-    Serial.println(" OFF ");
-    #endif
-    return 'O';
-  }
+    USART1->print("RPM ");
+    USART1->println("INC EVENT");  
+  #endif  
+    gotRPMIncreasedEvent=true;
 }
 
-void gotImmediateResponse(bool temp)
+void reportRPMIncreasedEvent()
 {
-	if (temp && rpmSensor.machineOn)
-	{
-#ifndef disable_debug
-		Serial.print("Machine Off :  ");
-		Serial.println(lastImmediateEvent);
-#endif
-
-		stopMachine();
-	}
-	else if (!temp)
-	{
-		rpmSensor.discardRPMEvent();
-	}
-	lastImmediateEvent = 'N';
-}
-
-
-void rpmIncreased()   //triggers when machine's RPM get increased beyond limit 
-{
-    #ifndef disable_debug
-    Serial.println("RPM EVENT");
-    #endif
-    sim1.registerEvent('F', true, true);
+  if(sim1.registerEvent('F', true, true))
+  {
     lastImmediateEvent = 'F';
-    //stopMachine();
-    
-/*    Serial.println("RPM INCREASED EVENT");  
-    sim1.registerEvent('F', true, true);
-    lastImmediateEvent = 'F';
-*/
+    gotRPMIncreasedEvent=false;
+  }
 }
 
 void machineSwitchedOn()
 {
-    lastImmediateEvent='N';
-    sim1.registerEvent('C', false, false);  
+  //lastImmediateEvent='N';
+  gotStartedEvent=true;
+}
+
+void reportStartEvent()
+{
+  if(sim1.registerEvent('C', true, false))
+    gotStartedEvent=false;
 }
 
 void machineSwitchedOff()
 {
   if (gotMachineOffCommand)
   {
-      #ifndef disable_debug
-      Serial.println("Off Command. Motor BackOff");
-      #endif
-      smotor1.backOff();
-  }
-  rpmSensor.discardRPMEvent();
+    smotor1.backOff();
+  }  
+  gotMachineOffCommand=false;
+  gotSwitchedOffEvent=true; 
+}
 
-  lastImmediateEvent='N';
-
-/*  if(lastImmediateEvent!='N')
+void reportSwitchOffEvent()
+{
+  if(sim1.registerEvent('O', true, false))
   {
-    sim1.registerEvent('F', true, false);
+    lastImmediateEvent='N';
+    gotSwitchedOffEvent=false; 
+  }  
+}
+
+void playBuzzer(byte times,byte d)
+{
+  int temp=d*100;
+  for(byte i=0;i<times;i++)
+  {
+    digitalWrite(PIN_BUZZER,HIGH);
+    delay(temp);
+    digitalWrite(PIN_BUZZER,LOW);
+    if(times>1)
+      delay(temp);
   }
-  else*/
-    sim1.registerEvent('O', false, false);
 }
 
 /*ISR(TIMER3_OVF_vect)
@@ -255,11 +308,11 @@ void printNumbers()
 
 void FIVR_RPM()
 {
-    if(digitalRead(SEN_RPM)==LOW)
+    if(digitalRead(PIN_RPMSEN)==LOW)
     {
-      rpmSensor.lastrise = rpmSensor.currentrise;
-      rpmSensor.currentrise = millis();
-      rpmSensor.gotTrigger = true;
+      rpmSensor1.lastrise = rpmSensor1.currentrise;
+      rpmSensor1.currentrise = millis();
+      rpmSensor1.gotTrigger = true;
     }
 
   /*int x = digitalRead(SEN_RPM);
@@ -286,14 +339,17 @@ void setup() {
   eeprom1.loadAllData();
   printNumbers();
 
-  sim1.setCallBackFunctions(gotImmediateResponse);
-  sim1.setDTMFFunctions(increaseRPM,decreaseRPM,stopMachine);
+  sim1.setCallBackFunctions(gotImmediateResponse,getRPM);
+  sim1.setDTMFFunctions(triggerIncreaseRPM,triggerDecreaseRPM,triggerStopMachine);
   
-  rpmSensor.setCallBackFunctions(rpmIncreased, machineSwitchedOff,machineSwitchedOn);
+  rpmSensor1.setCallBackFunctions(rpmIncreased, machineSwitchedOff,machineSwitchedOn);
 
   sim1.setEEPROM(&eeprom1);
-  rpmSensor.setEEPROM(&eeprom1);
+  rpmSensor1.setEEPROM(&eeprom1);
+  smotor1.setEEPROM(&eeprom1);
 
+  attachInterrupt(digitalPinToInterrupt(PIN_RPMSEN), FIVR_RPM, RISING);
+  //attachInterrupt(digitalPinToInterrupt(SEN_RPM), FIVR_RPM, CHANGE);
   gotMachineOffCommand = false;
  
 //FIVR_RPM();
@@ -302,59 +358,72 @@ void setup() {
 }
 
 String str;
-
 void loop() {
 
-  #ifndef disable_debug  
-  if (Serial.available() > 0)
+  if(gotCannotTurnOffMachineEvent)
+    reportCannotTurnOffMachine();
+
+  if(gotRPMIncreasedEvent)
+    reportRPMIncreasedEvent();
+
+  if(gotSwitchedOffEvent)
+    reportSwitchOffEvent();
+
+  if(gotStartedEvent)
+    reportStartEvent();
+
+  //if(securityAlarmed)
+  //  reportSecurityBreach();
+
+  if(!initialized)
   {
-    str = Serial.readStringUntil('\n');
+    if(!sensorInit && millis()>=3000)
+    {
+      batteryLevel.checkInitialBatteryLevel();
+      temp1.init();
+
+      sensorInit=true;
+    }
+    if(millis()>=5000)
+    {
+      if (!sim1.initialize())
+      {
+        #ifndef disable_debug
+          USART1->println("NOT INIT SIM");
+        #endif
+          playBuzzer(5,3);
+      }
+      else
+        playBuzzer(2,3);
+      initialized = true;  
+    }
+    return;
+  }
+
+  #ifndef disable_debug 
+  if (USART1->available() > 0)
+  {
+    str = USART1->readStringUntil('\n');
     if (str == "I\r")
-      increaseRPM();
-    //                    smotor1.increaseRPM();
+      triggerIncreaseRPM(1);
     else if (str == "D\r")
-      decreaseRPM();
-    //smotor1.decreaseRPM();
+      triggerDecreaseRPM(1);
     else if (str == "A\r")
-      stopMachine();
+      triggerStopMachine();
+    else
+      sim1.operateOnMsg(str,false);
   }
   #endif
 
-  if(!triedInit && millis()>5000)
-  {  
-    unsigned long t=millis();
-    if (!sim1.initialize())
-    {
-      #ifndef disable_debug
-      Serial.println("Problem in SIM");
-      #endif
-      digitalWrite(REL_SLOW,LOW);
-      digitalWrite(REL_FAST,LOW);
-      delay(1000);
-      digitalWrite(REL_SLOW,HIGH);
-      digitalWrite(REL_FAST,HIGH);
-    }
-    else
-    {
-      digitalWrite(REL_SLOW,LOW);
-      digitalWrite(REL_FAST,LOW);
-      delay(2000);
-      digitalWrite(REL_SLOW,HIGH);
-      digitalWrite(REL_FAST,HIGH);
-    }
-    triedInit=true;
-
-    attachInterrupt(digitalPinToInterrupt(SEN_RPM), FIVR_RPM, CHANGE);
-
-    #ifdef CHK_BATTERY
-      batteryLevel.checkInitialBatteryLevel();
-    #endif 
-  }
-  else
-  {
-    rpmSensor.update();
+    rpmSensor1.update();
     sim1.update();
     smotor1.update();
+    temp1.update();
     batteryLevel.update();  
-  }
+
+    if(temp1.triggerAlarm)
+      maxTempLimitReached();
+
+    if(batteryLevel.triggerAlarm)
+      lowBattery();
 }
