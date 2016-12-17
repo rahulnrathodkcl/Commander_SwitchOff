@@ -1,9 +1,9 @@
 #ifndef DEF_h
 #define DEF_h
 
+#include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <HardwareSerial.h>
-//#define disable_debug
 
 #define CHK_BATTERY
 // SELF
