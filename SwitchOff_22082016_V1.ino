@@ -12,12 +12,6 @@
 #include "Definitions.h"
 
 #define SIM_SLEEP_PIN 8
-
-//bool triedInit=false;
-//  const byte RX=5;
-//  const byte TX=6;
-//  SoftwareSerial s1(RX,TX);
-
 S_EEPROM eeprom1;
 
 bool gotMachineOffCommand;
@@ -268,18 +262,6 @@ void playBuzzer(byte times,byte d)
   }
 }
 
-/*ISR(TIMER3_OVF_vect)
-{
-  //TIMSK3&=~(1<<TOIE3);
-  //TIMSK3 = (TIMSK3 & 0xFE);   //disable the Timer INterrupt
-  //self1.NoRPM();
-
-  //Serial.println("Got A Timer OverFLow Event..");
-  
-  //digitalWrite(LED, !digitalRead(LED));
-  //  TCNT3 = 0x48E4;       //initialize the counter
-}*/
-
 void printNumbers()
 {
   #ifndef disable_debug
@@ -306,34 +288,32 @@ void printNumbers()
   #endif
 }
 
-void FIVR_RPM()
+ISR(BADISR_vect)
 {
-    if(digitalRead(PIN_RPMSEN)==LOW)
-    {
+    #ifndef disable_debug
+      USART1->println("!!!");
+      USART1->println(MCUSR);
+    #endif  
+}
+
+ISR(PCINT2_vect)
+{
+    #ifndef disable_debug
+      s1.gotInterrupt();
+    #endif
+}
+
+void FIVR_RPM()
+{    
       rpmSensor1.lastrise = rpmSensor1.currentrise;
       rpmSensor1.currentrise = millis();
       rpmSensor1.gotTrigger = true;
-    }
-
-  /*int x = digitalRead(SEN_RPM);
-  if (x == 0)
-  {
-    self1.lastrise = self1.currentrise;
-    self1.currentrise = millis();
-    self1.gotTrigger = true;
-
-    //TIMSK3 |= (1 << TOIE3); //enable timer 3 
-    //TCNT3 = 0x48E4;   //intialize the counter for timer 3
-    //Serial.println(TCNT3);
-    //self1.setTimer();
-  }*/
 }
 
 void setup() {
-  // put your setup code here, to run once:
-  //Serial1.begin(4800);    //SIM
-  #ifndef disable_debug
   Serial.begin(19200);
+  #ifndef disable_debug
+    USART1->begin(19200);
   #endif
 
   eeprom1.loadAllData();
@@ -349,12 +329,8 @@ void setup() {
   smotor1.setEEPROM(&eeprom1);
 
   attachInterrupt(digitalPinToInterrupt(PIN_RPMSEN), FIVR_RPM, RISING);
-  //attachInterrupt(digitalPinToInterrupt(SEN_RPM), FIVR_RPM, CHANGE);
   gotMachineOffCommand = false;
  
-//FIVR_RPM();
-//    set_sleep_mode(SLEEP_MODE_PWR_DOWN);   // sleep mode is set here
-//    sleep_enable(); 
 }
 
 String str;
